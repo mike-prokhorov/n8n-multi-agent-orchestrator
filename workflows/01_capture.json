@@ -1,0 +1,318 @@
+{
+  "name": "[HUB] Жора Capture",
+  "description": null,
+  "nodes": [
+    {
+      "id": "cap-trigger",
+      "name": "When Called by Жора",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "cap-prepare",
+      "name": "Prepare Capture",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst text = input.text || input.caption || (input.forwarded_content && input.forwarded_content.text) || '';\n\nconst m = text.match(/https?:\\/\\/[^\\s]+/);\nlet url = null, domain = '';\nif (m) {\n  url = m[0].replace(/[.,;!?\\)\\]]+$/, '');\n  const dm = url.match(/^https?:\\/\\/([^\\/]+)/); domain = dm ? dm[1].replace(/^www\\./,'') : '';\n}\n\nlet capture_type = 'text';\nif (input.has_photo || input.photo) capture_type = 'photo';\nelse if (input.is_forwarded && url) capture_type = 'forwarded_link';\nelse if (url) capture_type = 'link';\nelse if (input.is_forwarded) capture_type = 'forward';\n\nconst user_note = url ? text.replace(url, '').trim() : text;\n\nlet fetch_url = url;\nlet fetch_mode = 'html';\nif (domain === 'tiktok.com' || domain === 'vm.tiktok.com' || domain.endsWith('.tiktok.com')) {\n  fetch_url = 'https://www.tiktok.com/oembed?url=' + encodeURIComponent(url);\n  fetch_mode = 'oembed_tiktok';\n} else if (domain === 'youtube.com' || domain === 'youtu.be' || domain === 'm.youtube.com') {\n  fetch_url = 'https://www.youtube.com/oembed?url=' + encodeURIComponent(url) + '&format=json';\n  fetch_mode = 'oembed_youtube';\n}\n\nreturn [{ json: {\n  chat_id: input.chat_id, user_id: input.user_id, message_id: input.message_id,\n  username: input.username, capture_type, url, domain, user_note, text,\n  has_url: Boolean(url), fetch_url, fetch_mode\n}}];"
+      }
+    },
+    {
+      "id": "cap-if-url",
+      "name": "Has URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.has_url }}",
+              "rightValue": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cap-fetch",
+      "name": "Fetch Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -200,
+        -100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.fetch_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; ZhoraBot/1.0)"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/json;q=0.9,*/*;q=0.5"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          },
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "continueOnFail": true
+    },
+    {
+      "id": "cap-parse",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const meta = $('Prepare Capture').first().json;\nconst resp = $input.first().json;\nconst mode = meta.fetch_mode;\n\nfunction short(s,n){ if(!s) return ''; s=String(s); return s.length>n ? s.slice(0,n)+'…' : s; }\nfunction esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\nfunction decodeHtml(s){ return String(s||'').replace(/&amp;/g,'&').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' '); }\n\nlet title='', description='', author='', thumbnail='';\n\nif (mode === 'oembed_tiktok' || mode === 'oembed_youtube') {\n  const r = resp || {};\n  title = r.title || '';\n  author = r.author_name || '';\n  thumbnail = r.thumbnail_url || '';\n  description = title;\n} else {\n  let html = resp;\n  if (typeof html === 'object') html = (resp.data || resp.body || JSON.stringify(resp));\n  html = String(html || '').slice(0, 200000);\n  const mTitle = html.match(/<title[^>]*>([\\s\\S]{0,500}?)<\\/title>/i);\n  const mOgTitle = html.match(/<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']{0,500})[\"']/i);\n  const mDesc = html.match(/<meta[^>]+name=[\"']description[\"'][^>]+content=[\"']([^\"']{0,800})[\"']/i);\n  const mOgDesc = html.match(/<meta[^>]+property=[\"']og:description[\"'][^>]+content=[\"']([^\"']{0,800})[\"']/i);\n  const mOgImg = html.match(/<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']/i);\n  const mOgSite = html.match(/<meta[^>]+property=[\"']og:site_name[\"'][^>]+content=[\"']([^\"']+)[\"']/i);\n  title = decodeHtml((mOgTitle && mOgTitle[1]) || (mTitle && mTitle[1]) || '').trim();\n  description = decodeHtml((mOgDesc && mOgDesc[1]) || (mDesc && mDesc[1]) || '').trim();\n  thumbnail = (mOgImg && mOgImg[1]) || '';\n  author = decodeHtml((mOgSite && mOgSite[1]) || meta.domain || '');\n}\n\nif (!title) title = meta.url || '(без заголовка)';\n\nconst needs_firecrawl = !description && (mode === 'html');\nconst tags = [meta.domain, meta.capture_type].filter(Boolean);\nconst preview = description || short(title, 400);\n\nconst replyLines = [\n  `📥 <b>${esc(short(title, 180))}</b>`,\n  author ? `<i>${esc(short(author, 100))}</i>` : null,\n  `<code>${esc(meta.url)}</code>`,\n  preview && preview !== title ? `\\n${esc(short(preview, 400))}` : null,\n  `\\n<i>→ inbox (${esc(meta.capture_type)})</i>`\n].filter(Boolean);\n\nreturn [{ json: {\n  chat_id: meta.chat_id, user_id: meta.user_id, message_id: meta.message_id,\n  capture_type: meta.capture_type, url: meta.url, domain: meta.domain,\n  title: short(title, 500), description: short(description, 1500), preview: short(preview, 1500),\n  author: short(author, 200), thumbnail_url: thumbnail,\n  user_note: short(meta.user_note, 1000),\n  needs_firecrawl, tags_json: '{' + tags.map(function(t){ return '\"' + String(t).replace(/\"/g,'\\\\\"') + '\"'; }).join(',') + '}',\n  reply_text: replyLines.join('\\n')\n}}];"
+      }
+    },
+    {
+      "id": "cap-save",
+      "name": "Save to Inbox",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -200
+      ],
+      "parameters": {
+        "operation": "create",
+        "tableId": "zhora_inbox",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "chat_id",
+              "fieldValue": "={{ $json.chat_id }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $json.message_id }}"
+            },
+            {
+              "fieldId": "capture_type",
+              "fieldValue": "={{ $json.capture_type }}"
+            },
+            {
+              "fieldId": "url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "domain",
+              "fieldValue": "={{ $json.domain }}"
+            },
+            {
+              "fieldId": "title",
+              "fieldValue": "={{ $json.title }}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{ $json.description }}"
+            },
+            {
+              "fieldId": "preview",
+              "fieldValue": "={{ $json.preview }}"
+            },
+            {
+              "fieldId": "author",
+              "fieldValue": "={{ $json.author }}"
+            },
+            {
+              "fieldId": "thumbnail_url",
+              "fieldValue": "={{ $json.thumbnail_url }}"
+            },
+            {
+              "fieldId": "user_note",
+              "fieldValue": "={{ $json.user_note }}"
+            },
+            {
+              "fieldId": "needs_firecrawl",
+              "fieldValue": "={{ $json.needs_firecrawl }}"
+            },
+            {
+              "fieldId": "tags",
+              "fieldValue": "={{ $json.tags_json }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "cap-reply",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "replyParameters": {
+          "messageId": "={{ $json.message_id }}"
+        },
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false,
+          "link_preview_options": {
+            "is_disabled": true
+          }
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "cap-nourl",
+      "name": "Skip (No URL)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        200
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "When Called by Жора": {
+      "main": [
+        [
+          {
+            "node": "Prepare Capture",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Capture": {
+      "main": [
+        [
+          {
+            "node": "Has URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has URL?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip (No URL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Save to Inbox",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

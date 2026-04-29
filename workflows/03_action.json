@@ -1,0 +1,915 @@
+{
+  "name": "[HUB] Жора Action",
+  "description": null,
+  "nodes": [
+    {
+      "id": "action-trigger",
+      "name": "When Called by Жора",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Switch by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "new_task",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "new-task-check",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.output.intent }}",
+                    "rightValue": "new_task"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "task_update",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "task-update-check",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.output.intent }}",
+                    "rightValue": "task_update"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "dialogue",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "dialogue-check",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.output.intent }}",
+                    "rightValue": "dialogue"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Prepare New Task Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "const decision = $input.first().json.output;\nconst originalData = $('When Called by Жора').first().json.original_data;\nconst context = originalData.context;\n\nlet sourceData = null;\n\n// ============================================\n// ПРИОРИТЕТ #1-4: Context-based source_data\n// ============================================\n\nif (context && context.context_type) {\n  \n  // Приоритет 1: Reply на longread\n  if (context.context_type === 'longread') {\n    sourceData = {\n      type: 'longread',\n      news_list: context.content.news_list,\n      user_instruction: decision.user_request\n    };\n  }\n  \n  // Приоритет 2: Forwarded message\n  else if (context.context_type === 'forwarded') {\n    sourceData = {\n      type: 'forwarded_message',\n      text: context.forwarded_content.text,\n      forwarded_date: context.forwarded_content.forwarded_date\n    };\n  }\n  \n  // Приоритет 3: Photo\n  else if (context.context_type === 'photo') {\n    sourceData = {\n      type: 'photo',\n      photo_file_id: context.photo_file_id\n    };\n  }\n  \n  // Приоритет 3.5: Post (reply на пост)\n  else if (context.context_type === 'post') {\n    sourceData = {\n      type: 'post',\n      task_id: context.task_id,\n      post_text: context.content?.post_text || '',\n      photo_file_id: context.content?.photo_file_id || null,\n      version: context.content?.version || 1,\n      sources: context.content?.sources || []\n    };\n    console.log('[PREPARE NEW TASK] Post source_data from reply, text length:', sourceData.post_text.length);\n  }\n  \n  // Приоритет 4: Task (обновление)\n  else if (context.context_type === 'task') {\n    sourceData = null;\n  }\n  \n  // Приоритет 5: Research\n  else if (context.context_type === 'research') {\n    sourceData = {\n      type: 'research',\n      content: context.content?.content || null,\n      sources: context.content?.sources || []\n    };\n  }\n  \n  else {\n    sourceData = null;\n  }\n}\n\n// ПРИОРИТЕТ #5: Неявные ссылки на completed tasks\nif (!sourceData && decision.user_request) {\n  const implicitReferences = [\n    'для этого поста',\n    'к этому посту', \n    'про этот пост',\n    'для того поста',\n    'к той новости',\n    'про ту новость',\n    'для этой новости',\n    'к этой новости'\n  ];\n  \n  const requestLower = decision.user_request.toLowerCase();\n  const hasImplicitReference = implicitReferences.some(phrase => \n    requestLower.includes(phrase)\n  );\n  \n  if (hasImplicitReference && originalData.completed_tasks?.length > 0) {\n    const lastCopywritingTask = originalData.completed_tasks\n      .filter(t => t.department === 'copywriting')\n      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0];\n    \n    if (lastCopywritingTask) {\n      sourceData = {\n        reference_task_id: lastCopywritingTask.id,  // ✅ Только ID\n        reference_type: 'post',                     // ✅ Тип источника\n        user_request: decision.user_request         // ✅ Запрос\n      };\n      \n      console.log('[PREPARE NEW TASK] Implicit reference detected, reference_task_id:', lastCopywritingTask.id);\n    }\n  }\n}\n// ============================================\n// ФОРМИРУЕМ ИТОГОВЫЙ ОБЪЕКТ\n// ============================================\n\nreturn {\n  json: {\n    chat_id: originalData.chat_id,\n    user_id: originalData.user_id,\n    department: decision.department,\n    status: 'created',\n    initial_prompt: decision.user_request,\n    source_data: sourceData,\n    agent_output: {\n      current_version: 1,\n      versions: []\n    },\n    _trigger: {\n      intent: 'new_task',\n      chat_id: originalData.chat_id,\n      reply_to_message_id: originalData.reply_to_message_id,\n      user_request: decision.user_request,\n      department: decision.department\n    }\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Create Task in Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -200
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "tasks",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chat_id",
+              "fieldValue": "={{ $json.chat_id }}"
+            },
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $json.user_id }}"
+            },
+            {
+              "fieldId": "department",
+              "fieldValue": "={{ $json.department }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "={{ $json.status }}"
+            },
+            {
+              "fieldId": "initial_prompt",
+              "fieldValue": "={{ $json.initial_prompt }}"
+            },
+            {
+              "fieldId": "agent_output",
+              "fieldValue": "={{ $json.agent_output }}"
+            },
+            {
+              "fieldId": "source_data",
+              "fieldValue": "={{ $json.source_data }}"
+            },
+            {
+              "fieldId": "version",
+              "fieldValue": "1"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Prepare Update Task Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const decision = $input.first().json.output;\nconst originalData = $('When Called by Жора').first().json.original_data;\nconst context = originalData.context;\n\nlet taskId = null;\nlet taskData = null;\nlet fullAgentOutput = null;\n\n// Загрузка completed tasks\nlet completedTasks = [];\ntry {\n  completedTasks = originalData.completed_tasks || [];\n} catch (e) {\n  console.log('[Prepare Update Task Data] Failed to load completed tasks:', e);\n  completedTasks = [];\n}\n\n// ПРИОРИТЕТ #1: target_task_id от AI Agent\nif (decision.target_task_id) {\n  const targetTask = completedTasks.find(task => task.id === decision.target_task_id);\n  \n  if (targetTask) {\n    taskId = targetTask.id;\n    taskData = {\n      current_version: targetTask.agent_output?.current_version || 0,\n      department: targetTask.department\n    };\n    fullAgentOutput = targetTask.agent_output;\n  } else {\n    throw new Error(`Task ${decision.target_task_id} not found in completed tasks`);\n  }\n}\n\n// ПРИОРИТЕТ #2: REPLY контекст\nelse if (context.task_id) {\n  taskId = context.task_id;\n  const targetTask = completedTasks.find(task => task.id === context.task_id);\n  \n  if (targetTask) {\n    taskData = {\n      current_version: targetTask.agent_output?.current_version || 0,\n      department: targetTask.department\n    };\n    fullAgentOutput = targetTask.agent_output;\n  } else {\n    taskData = {\n      current_version: 0,\n      department: decision.department\n    };\n    fullAgentOutput = { current_version: 0, versions: [] };\n  }\n}\n\n// ПРИОРИТЕТ #3: Последняя задача с matching department\nelse if (completedTasks.length > 0 && decision.department) {\n  const tasksInDepartment = completedTasks.filter(\n    task => task.department === decision.department\n  );\n  \n  if (tasksInDepartment.length > 0) {\n    const targetTask = tasksInDepartment[0];\n    taskId = targetTask.id;\n    taskData = {\n      current_version: targetTask.agent_output?.current_version || 0,\n      department: targetTask.department\n    };\n    fullAgentOutput = targetTask.agent_output;\n  }\n}\n\n// FALLBACK: задачи не нашли\nif (!taskId) {\n  const hint = decision.department && completedTasks.length > 0\n    ? `No ${decision.department} tasks found in recent history. Reply to a specific task message or create a new task.`\n    : 'No recent completed tasks found. Reply to a task message or create a new task.';\n  \n  throw new Error(hint);\n}\n\n// Формируем обновлённый agent_output\nif (typeof fullAgentOutput === 'string') {\n  try {\n    fullAgentOutput = JSON.parse(fullAgentOutput);\n  } catch (e) {\n    fullAgentOutput = { current_version: 0, versions: [] };\n  }\n}\n\nlet versions = fullAgentOutput?.versions || [];\n\n// Создаём новую версию\nconst newVersion = {\n  version: (fullAgentOutput?.current_version || 0) + 1,\n  user_request: decision.user_request,\n  agent_response: null,\n  timestamp: new Date().toISOString()\n};\n\n// Проверка безопасности (логируем, не блокируем)\nif (versions.length > 0) {\n  const lastVersion = versions[versions.length - 1];\n  if (lastVersion.version && lastVersion.version !== newVersion.version - 1) {\n    console.warn(`[PREPARE UPDATE] Version sequence warning: last=${lastVersion.version}, new=${newVersion.version}`);\n  }\n}\n\nversions.push(newVersion);\n\nconst updatedAgentOutput = {\n  versions: versions,\n  current_version: newVersion.version\n};\n\nreturn {\n  json: {\n    task_id: taskId,\n    agent_output: updatedAgentOutput,\n    status: 'in_progress',\n    department: taskData?.department || decision.department,\n    reply_to_message_id: originalData.reply_to_message_id,\n    _trigger: {\n      intent: 'task_update',\n      chat_id: originalData.chat_id,\n      reply_to_message_id: originalData.reply_to_message_id,\n      user_request: decision.user_request,\n      department: taskData?.department || decision.department\n    }\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Update Task in Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        0
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.task_id }}",
+              "condition": "eq"
+            }
+          ]
+        },
+        "tableId": "tasks",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "in_progress"
+            }
+          ]
+        },
+        "matchType": "allFilters",
+        "operation": "update",
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Clarification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "text": "={{ $json.message }}",
+        "chatId": "={{ $json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Merge All Routes",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        0,
+        -100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "<uuid>",
+      "name": "Prepare Success Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const taskData = $input.first().json;\nconst trg = taskData._trigger || {};\nconst intent = trg.intent || 'new_task';\nconst department = taskData.department || trg.department;\n\nconst newTaskPhrases = [\n  'Создал задачу ✅',\n  'В работе 🚀',\n  'Суечусь ✨',\n  'Уже делаю ⚡',\n  'Уже начал 👌',\n  'Делаю ⚡'\n];\n\nconst updateTaskPhrases = [\n  'Обновляю 🔄',\n  'Правлю  🛠',\n  'Не вопрос 🛠',\n  'Моментик ⚙️',\n  'Ща будет 🔄'\n];\n\nlet message = '';\n\nif (intent === 'new_task') {\n  message = newTaskPhrases[Math.floor(Math.random() * newTaskPhrases.length)];\n} else if (intent === 'task_update') {\n  message = updateTaskPhrases[Math.floor(Math.random() * updateTaskPhrases.length)];\n} else {\n  message = 'Готово!';\n}\n\nlet effectiveUserRequest = taskData.initial_prompt;\nif (intent === 'task_update') {\n  effectiveUserRequest = trg.user_request || taskData.initial_prompt;\n}\n\nreturn {\n  json: {\n    ...taskData,\n    telegram_message: message,\n    chat_id: trg.chat_id || taskData.chat_id,\n    department: department,\n    effective_user_request: effectiveUserRequest,\n    reply_to_message_id: trg.reply_to_message_id || taskData.reply_to_message_id || null\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        100
+      ],
+      "parameters": {
+        "text": "={{ $json.telegram_message }}",
+        "chatId": "={{ $json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "e3216da4-7c17-4581-a7b4-95f<TG_USER_ID>e",
+      "name": "Execute Copywriting",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        -300
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "ms4UpiiPsGF8GRpZ",
+          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "cachedResultName": ""
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Execute Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        300
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "w2J2Nvqf9w3T8G2I",
+          "cachedResultUrl": "/workflow/YWVgcNTa3YG2rvJA",
+          "cachedResultName": "[SMM] Research Agent"
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Execute Image Gen",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        -200
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "RLNAMdc1C9krPt7o",
+          "cachedResultUrl": "/workflow/WHvXosyNwhLB6OOp",
+          "cachedResultName": ""
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Execute Image Edit",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        -100
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "yrdBxd3PxAosMSGg",
+          "cachedResultUrl": "/workflow/UpcjQTagDBhV8ChU",
+          "cachedResultName": ""
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Switch Department",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        400,
+        -100
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "copywriting",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "copywriting"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "image_gen",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "image_gen"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "image_edit",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "image_edit"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "research",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "research"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "longwriter",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "longwriter-case-001",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "longwriter"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "reels_ideas",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "reels-ideas-case-001",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.department }}",
+                    "rightValue": "reels_ideas"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Execute Longwriter",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "UPFcgobNesc5H0do",
+          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "cachedResultName": "Secretary: Longwriter"
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Execute Reels Ideas",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        600,
+        100
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "oVbxXDb6knuvR9MJ",
+          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "cachedResultName": "Reels Collector Bot"
+        },
+        "workflowInputs": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "gen-options-001",
+      "name": "Generate Options",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        200
+      ],
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\"role\": \"system\", \"content\": \"Ты — квалификатор запросов Boss (n8n автоматизатор из Da Nang). На вход — неясный запрос. Предложи РОВНО 3 варианта что Boss мог иметь в виду. Каждый вариант = конкретная задача для department: copywriting (короткий пост 100-400 слов) | research (рисёрч темы) | longwriter (лонгрид 1500-3500 знаков) | image_gen (картинка) | image_edit (редакт фото) | reels_ideas (анализ TikTok/YT/IG ссылки). Верни СТРОГО JSON без markdown: {\\\"options\\\":[{\\\"num\\\":1,\\\"emoji\\\":\\\"📝\\\",\\\"title\\\":\\\"короткое описание в императиве\\\",\\\"intent\\\":\\\"new_task\\\",\\\"department\\\":\\\"copywriting\\\",\\\"request\\\":\\\"полная фраза для агента department\\\"},...]}\"},\n    {\"role\": \"user\", \"content\": {{ JSON.stringify($json.output.user_request) }}}\n  ],\n  \"response_format\": {\"type\": \"json_object\"},\n  \"temperature\": 0.5\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi"
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "<credential-id>",
+          "name": "Openai Account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "format-options-001",
+      "name": "Format Options & Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const raw = $json.choices[0].message.content;\nconst parsed = JSON.parse(raw);\nconst state = $getWorkflowStaticData('global');\nconst chatId = $('When Called by Жора').first().json.original_data.chat_id;\n\nstate[`options_${chatId}`] = {\n  options: parsed.options,\n  expires: Date.now() + 300000\n};\n\nconst text = `🤔 Уточни что нужно:\\n\\n${parsed.options.map(o => `${o.num}. ${o.emoji} ${o.title}`).join('\\n')}\\n\\nОтветь цифрой (1–3) или напиши заново.`;\n\nreturn [{ json: { message: text, chat_id: chatId } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Жора": {
+      "main": [
+        [
+          {
+            "node": "Switch by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch by Intent": {
+      "main": [
+        [
+          {
+            "node": "Prepare New Task Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Update Task Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare New Task Data": {
+      "main": [
+        [
+          {
+            "node": "Create Task in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Task in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Merge All Routes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Update Task Data": {
+      "main": [
+        [
+          {
+            "node": "Update Task in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Task in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Merge All Routes",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Routes": {
+      "main": [
+        [
+          {
+            "node": "Prepare Success Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Success Message": {
+      "main": [
+        [
+          {
+            "node": "Switch Department",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Department": {
+      "main": [
+        [
+          {
+            "node": "Execute Copywriting",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Image Gen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Image Edit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Longwriter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Reels Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Options": {
+      "main": [
+        [
+          {
+            "node": "Format Options & Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Options & Save": {
+      "main": [
+        [
+          {
+            "node": "Send Clarification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "errorWorkflow": "O6BjG1ublqWZ1KWk",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "global": {
+      "options_undefined": {
+        "options": [
+          {
+            "num": 1,
+            "emoji": "🔍",
+            "title": "проанализировать ваши TikTok ссылки",
+            "intent": "analyze_links",
+            "department": "reels_ideas",
+            "request": "проанализируйте все TikTok ссылки, которые пользователь предоставлял, и составьте полный список с датами и авторами"
+          },
+          {
+            "num": 2,
+            "emoji": "📝",
+            "title": "создать пост о ваших TikTok предпочтениях",
+            "intent": "create_post",
+            "department": "copywriting",
+            "request": "напишите короткий пост о предпочтениях пользователя в TikTok на основе предоставленных ссылок, включая даты и авторов"
+          },
+          {
+            "num": 3,
+            "emoji": "📊",
+            "title": "исследовать популярные TikTok тренды",
+            "intent": "research_trends",
+            "department": "research",
+            "request": "исследуйте популярные тренды в TikTok, которые могли бы соответствовать интересам пользователя на основе предоставленных ссылок"
+          }
+        ],
+        "expires": 1776843865710
+      }
+    }
+  }
+}

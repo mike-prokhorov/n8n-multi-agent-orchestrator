@@ -1,0 +1,12 @@
+.env
+.env.*
+*.local
+
+# n8n raw exports — only sanitized files in workflows/ should be committed
+*_raw.json
+raw/
+
+# editor
+.DS_Store
+.vscode/
+.idea/

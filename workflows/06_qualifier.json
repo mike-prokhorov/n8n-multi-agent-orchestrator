@@ -1,0 +1,990 @@
+{
+  "name": "[SMM] Qualifizer v0.8 (Жора главбосс)",
+  "description": null,
+  "nodes": [
+    {
+      "id": "<uuid>",
+      "name": "Prepare Message Data",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        16,
+        992
+      ],
+      "parameters": {
+        "jsCode": "// ============================================\n// ИНИЦИАЛИЗАЦИЯ: Универсальная обработка входных данных\n// ============================================\n\nconst inputData = $input.first().json;\n\nconst messageObject = inputData.message || null;\nconst userInput = inputData.userInput || null;\n\nlet telegramMessage = null;\n\nif (!messageObject && userInput) {\n  try {\n    telegramMessage = $('Telegram Trigger').first().json.message;\n  } catch (e) {\n    console.log('Failed to get Telegram Trigger data:', e);\n    telegramMessage = null;\n  }\n}\n\nlet replyObject = null;\n\nif (inputData.replyObject) {\n  if (typeof inputData.replyObject === 'string') {\n    try {\n      replyObject = JSON.parse(inputData.replyObject);\n    } catch (e) {\n      console.log('Failed to parse replyObject:', e);\n      replyObject = null;\n    }\n  } else {\n    replyObject = inputData.replyObject;\n  }\n}\n\nconst telegramData = messageObject || telegramMessage || inputData;\n\nif (!replyObject && telegramData.reply_to_message) {\n  replyObject = telegramData.reply_to_message;\n}\n\nconst chatId = telegramData.chat?.id || telegramData.chat_id || replyObject?.chat?.id;\nconst userId = telegramData.from?.id || telegramData.user_id || replyObject?.from?.id;\nconst username = telegramData.from?.username || telegramData.username || replyObject?.from?.username || '';\nconst messageId = telegramData.message_id || inputData.message_id;\n\n// ============================================\n// ПРОВЕРКА 1: Forwarded message\n// ============================================\n\nconst forwardOrigin = telegramData.forward_origin || telegramData.forward_from;\nconst isForwarded = Boolean(forwardOrigin);\n\nif (isForwarded) {\n  return {\n    json: {\n      message_id: messageId,\n      chat_id: chatId,\n      user_id: userId,\n      username: username,\n      text: telegramData.text || telegramData.caption || '',\n      is_forwarded: true,\n      forwarded_content: {\n        text: telegramData.text || telegramData.caption || '',\n        forward_date: telegramData.forward_date\n      },\n      is_reply: false,\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\n// ============================================\n// ПРОВЕРКА 2: Фото + caption (ГОТОВАЯ ЗАДАЧА)\n// ============================================\n\nconst hasPhoto = !!telegramData.photo;\nconst caption = hasPhoto ? (telegramData.caption || null) : null;\nconst hasCaption = caption && caption.trim().length > 0;\n\nif (hasPhoto && hasCaption) {\n  return {\n    json: {\n      message_id: messageId,\n      chat_id: chatId,\n      user_id: userId,\n      username: username,\n      text: caption,\n      is_reply: Boolean(replyObject),\n      reply_to_message_id: replyObject?.message_id || null,\n      has_photo: true,\n      photo_file_id: telegramData.photo[telegramData.photo.length - 1].file_id,\n      is_ready_photo_task: true,\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\n// ============================================\n// ПРОВЕРКА 3: Фото БЕЗ caption\n// ============================================\n\nif (hasPhoto && !hasCaption) {\n  return {\n    json: {\n      message_id: messageId,\n      chat_id: chatId,\n      user_id: userId,\n      username: username,\n      photo: telegramData.photo,\n      caption: null,\n      is_reply: Boolean(replyObject),\n      reply_to_message_id: replyObject?.message_id || null,\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\n// ============================================\n// ПРОВЕРКА 4: Обычное сообщение (текст)\n// НОВОЕ: резолв выбора цифрой (1/2/3) из staticData\n// ============================================\n\nconst rawText = userInput || telegramData.text || '';\nconst numMatch = rawText.trim().match(/^[1-3]$/);\nlet resolvedText = rawText;\nlet selectedOption = null;\n\nif (numMatch) {\n  const state = $getWorkflowStaticData('global');\n  const stored = state[`options_${chatId}`];\n  if (stored && stored.expires > Date.now() && Array.isArray(stored.options)) {\n    const idx = parseInt(numMatch[0]) - 1;\n    selectedOption = stored.options[idx] || null;\n    if (selectedOption && selectedOption.request) {\n      resolvedText = selectedOption.request;\n      delete state[`options_${chatId}`];\n      console.log('[PREPARE MSG] Option selected:', numMatch[0], '=>', resolvedText);\n    }\n  }\n}\n\nreturn {\n  json: {\n    message_id: messageId,\n    chat_id: chatId,\n    user_id: userId,\n    username: username,\n    text: resolvedText,\n    is_reply: Boolean(replyObject),\n    reply_to_message_id: replyObject?.message_id || null,\n    timestamp: new Date().toISOString(),\n    _selected_option: selectedOption\n  }\n};"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "<uuid>",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "position": [
+        -1360,
+        1008
+      ],
+      "webhookId": "<webhook-uuid>",
+      "parameters": {
+        "updates": [
+          "*"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1648,
+        832
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 2104,
+        "height": 432,
+        "content": "# –––> ПОЛУЧИЛ\n\n"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        480,
+        832
+      ],
+      "parameters": {
+        "color": 4,
+        "width": 1080,
+        "height": 432,
+        "content": "# БД"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1488,
+        1456
+      ],
+      "parameters": {
+        "color": 6,
+        "width": 1896,
+        "height": 688,
+        "content": "# –––> ВЫБРАЛ ДЕПАРТАМЕНТ\n\n"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        432,
+        1456
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 912,
+        "height": 960,
+        "content": "# –––> ОТДАЛ В РАБОТУ"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Download Voice File",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        -752,
+        880
+      ],
+      "parameters": {
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "resource": "file",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "<uuid>",
+      "name": "Transcribe Audio",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        -560,
+        880
+      ],
+      "parameters": {
+        "options": {},
+        "resource": "audio",
+        "operation": "transcribe"
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "<credential-id>",
+          "name": "Openai Account"
+        }
+      },
+      "typeVersion": 1.6
+    },
+    {
+      "id": "<uuid>",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        -176,
+        992
+      ],
+      "parameters": {},
+      "typeVersion": 3.2
+    },
+    {
+      "id": "160fff6b-1d86-4304-a8c7-c<TG_USER_ID>d32",
+      "name": "Set Text",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -368,
+        1088
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "<uuid>",
+              "name": "userInput",
+              "type": "string",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "id": "c90c8878-08a0-4db1-9b6b-18a<TG_USER_ID>",
+              "name": "replyObject",
+              "type": "string",
+              "value": "={{ $('Telegram Trigger').item.json.message.reply_to_message }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "<uuid>",
+      "name": "Set Voice",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -368,
+        880
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "<uuid>",
+              "name": "userInput",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "id": "<uuid>",
+              "name": "replyObject",
+              "type": "string",
+              "value": "={{ $('Telegram Trigger').item.json.message.reply_to_message }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "<uuid>",
+      "name": "Switch Message Type",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        208,
+        944
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "link",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "link-cond-01",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "leftValue": "={{ ($json.text || '') + ' ' + ($json.caption || '') + ' ' + ($json.forwarded_content?.text || '') }}",
+                    "rightValue": "https?://"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "command",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    },
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "/"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "edit_photo",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.is_ready_photo_task }}",
+                    "rightValue": "true"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "photo_no_caption",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.photo && $json.photo.length > 0 && !$json.caption }}",
+                    "rightValue": 5
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "forwarded",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.is_forwarded }}",
+                    "rightValue": ""
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "text"
+        }
+      },
+      "typeVersion": 3.3
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        480,
+        -176
+      ],
+      "parameters": {
+        "color": 3,
+        "width": 904,
+        "height": 400,
+        "content": "## [команда] /start  или  /stop"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        480,
+        240
+      ],
+      "parameters": {
+        "width": 904,
+        "height": 272,
+        "content": "## [ фото ] но без подписи\n \n"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Sticky Note6",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        480,
+        528
+      ],
+      "parameters": {
+        "color": 5,
+        "width": 720,
+        "height": 272,
+        "content": "## > > > пересланное\n"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Switch Type",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        -944,
+        976
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Voice",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.message.voice.file_id }}",
+                    "rightValue": ""
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "Photo",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    },
+                    "leftValue": "={{ $json.message.photo.length }}",
+                    "rightValue": 0
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "Text",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": ""
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 3.2
+    },
+    {
+      "id": "<uuid>",
+      "name": "HTTP typing...",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput",
+      "maxTries": 3,
+      "position": [
+        -1552,
+        1008
+      ],
+      "parameters": {
+        "url": "https://api.telegram.org/bot<TG_USER_ID>:AAEsrbkAUgG7GFKpd_UqrjR0m8d8r3akSTM/sendChatAction",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.message.from.id }}"
+            },
+            {
+              "name": "action",
+              "value": "typing"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "<uuid>",
+      "name": "Check Authorized User",
+      "type": "n8n-nodes-base.if",
+      "disabled": false,
+      "position": [
+        -1152,
+        1008
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "<uuid>",
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.message.from.id }}",
+              "rightValue": "<BOSS_USER_ID>"
+            },
+            {
+              "id": "cartoonboss-auth",
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.message.from.id }}",
+              "rightValue": "<TG_USER_ID>"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "call-cmd-sub",
+      "name": "Call Commands Sub",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        544,
+        -48
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "2TNavCr9XfeeXYHN",
+          "cachedResultName": "[HUB] Жора Commands"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "waitForSubWorkflow": true
+      }
+    },
+    {
+      "id": "set-mt-photo",
+      "name": "Set Media Type Photo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        780,
+        240
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mt-p",
+              "name": "_media_type",
+              "type": "string",
+              "value": "photo"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "set-mt-fwd",
+      "name": "Set Media Type Forward",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        780,
+        520
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mt-f",
+              "name": "_media_type",
+              "type": "string",
+              "value": "forward"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "call-media-sub",
+      "name": "Call Media Sub",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1000,
+        400
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "p7jpXhztHs77S2fT",
+          "cachedResultName": "[HUB] Жора Media"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "waitForSubWorkflow": true
+      }
+    },
+    {
+      "id": "call-cls-sub",
+      "name": "Call Classifier Sub",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        1100
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qtySxzjNAuv6DNg9",
+          "cachedResultName": "[HUB] Жора AI Classifier"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "waitForSubWorkflow": true
+      }
+    },
+    {
+      "id": "call-act-sub",
+      "name": "Call Action Sub",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        400,
+        1100
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "VnGlEDpzbmzGngFf",
+          "cachedResultName": "[HUB] Жора Action"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "waitForSubWorkflow": true
+      }
+    },
+    {
+      "id": "call-capture-sub",
+      "name": "Call Capture Sub",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        544,
+        -350
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "XfRhryytHjmF7H6m",
+          "cachedResultName": "[HUB] Жора Capture"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "waitForSubWorkflow": true
+      }
+    },
+    {
+      "id": "text-pass",
+      "name": "Text Pass",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        400,
+        1400
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Prepare Message Data": {
+      "main": [
+        [
+          {
+            "node": "Switch Message Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP typing...",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Authorized User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Voice File": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Audio": {
+      "main": [
+        [
+          {
+            "node": "Set Voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Text": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Set Voice": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Type": {
+      "main": [
+        [
+          {
+            "node": "Download Voice File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Set Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Authorized User": {
+      "main": [
+        [
+          {
+            "node": "Switch Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Media Type Photo": {
+      "main": [
+        [
+          {
+            "node": "Call Media Sub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Media Type Forward": {
+      "main": [
+        [
+          {
+            "node": "Call Media Sub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Classifier Sub": {
+      "main": [
+        [
+          {
+            "node": "Call Action Sub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Message Type": {
+      "main": [
+        [
+          {
+            "node": "Call Capture Sub",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Commands Sub",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Classifier Sub",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Media Type Photo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Media Type Forward",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Text Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Pass": {
+      "main": [
+        [
+          {
+            "node": "Call Classifier Sub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Europe/Moscow",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "O6BjG1ublqWZ1KWk",
+    "availableInMCP": false,
+    "executionOrder": "v1"
+  },
+  "staticData": {}
+}

@@ -1,0 +1,504 @@
+{
+  "name": "[HUB] Жора AI Classifier",
+  "description": null,
+  "nodes": [
+    {
+      "id": "cls-trigger",
+      "name": "When Called by Жора",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Check if Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "reply-check",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.is_reply }}",
+              "rightValue": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Load Reply Context (RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -200
+      ],
+      "parameters": {
+        "url": "https://your-project.supabase.co/rest/v1/rpc/find_context_by_reply",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "jsonBody": "={\n  \"p_telegram_message_id\": {{ $json.reply_to_message_id }},\n  \"p_chat_id\": {{ $json.chat_id }}\n}",
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept-Profile",
+              "value": "smm_army"
+            },
+            {
+              "name": "Content-Profile",
+              "value": "smm_army"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "<credential-id>",
+          "name": "Httpheaderauth Account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "<uuid>",
+      "name": "Load Active Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "limit": 5,
+        "schema": "smm_army",
+        "tableId": "tasks",
+        "operation": "getAll",
+        "filterType": "string",
+        "filterString": "=chat_id=eq.{{ $json.chat_id }}&status=in.(completed)&order=updated_at.desc&limit=5",
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -200,
+        0
+      ],
+      "parameters": {
+        "numberInputs": 3
+      }
+    },
+    {
+      "id": "<TG_USER_ID>-c548-4ad5-b6b0-34d3179e5739",
+      "name": "Extract Specific Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ============================================\n// ПРОВЕРКА: Откуда пришли данные?\n// ============================================\n\nconst inputData = $input.first().json;\nconst messageData = $('When Called by Жора').first().json;\n\n// ============================================\n// CASE 1: Данные от Load Context (RPC) — уже есть контекст!\n// ============================================\n\nif (inputData.context_type) {\n  let content = inputData.content;\n  if (typeof content === 'string') {\n    try {\n      content = JSON.parse(content);\n    } catch (e) {\n      content = null;\n    }\n  }\n\n  let contextType = inputData.context_type;\n  if (contextType === 'photo_temp') {\n    contextType = 'photo';\n  } else if (contextType === 'forwarded_temp') {\n    contextType = 'forwarded';\n  }\n  \n  // Базовая структура context\n  const contextData = {\n    context_type: contextType,\n    has_photo: contextType === 'photo',\n    photo_file_id: content?.photo_file_id || null,\n    has_forwarded: contextType === 'forwarded',\n    forwarded_content: contextType === 'forwarded' ? content : null,\n    task_id: inputData.task_id,\n    content: content\n  };\n  \n  // ✅ НОВОЕ: Парсим структуру для POST\n  if (contextType === 'post') {\n    contextData.content = {\n      post_text: content?.text || '',\n      photo_file_id: content?.photo_file_id || null,\n      version: content?.version || 1,\n      sources: content?.sources || []\n    };\n  }\n\n  return {\n    json: {\n      user_message: messageData.text,\n      chat_id: messageData.chat_id,\n      message_id: messageData.message_id,\n      user_id: messageData.user_id,\n      reply_to_message_id: messageData.reply_to_message_id,\n      context: contextData\n    }\n  };\n}\n\n// ВСЁ ОСТАЛЬНОЕ БЕЗ ИЗМЕНЕНИЙ!\n// (CASE 2, CASE 0, БЛОК 4, БЛОК 5, ПРИОРИТЕТ 3 - НЕ ТРОГАЕМ)\n\n// ============================================\n// CASE 2: Implicit context (NO Reply)\n// ============================================\n\nconst context = {\n  context_type: null,\n  content: null,\n  task_id: null,\n  has_forwarded: false,\n  forwarded_content: null,\n  has_photo: false,\n  photo_file_id: null\n};\n\nif (messageData.is_ready_photo_task === true) {\n  context.context_type = 'photo';\n  context.has_photo = true;\n  context.photo_file_id = messageData.photo_file_id;\n\n  return {\n    json: {\n      user_message: messageData.text,\n      chat_id: messageData.chat_id,\n      message_id: messageData.message_id,\n      user_id: messageData.user_id,\n      reply_to_message_id: messageData.reply_to_message_id,\n      context: context\n    }\n  };\n}\n\nlet recentMessages = [];\ntry {\n  const loadRecentData = $('Load Recent Messages').all();\n  if (loadRecentData && loadRecentData.length > 0) {\n    recentMessages = loadRecentData.map(item => {\n      const json = item.json;\n      if (json.content_data && typeof json.content_data === 'string') {\n        try {\n          json.content_data = JSON.parse(json.content_data);\n        } catch (e) {\n          console.log('Failed to parse content_data:', e);\n        }\n      }\n      return json;\n    });\n  }\n} catch (e) {\n  recentMessages = [];\n}\n\nif (recentMessages.length > 0) {\n  const clearCommand = recentMessages.find(m => \n    m.message_type === 'command' && \n    (m.content_data?.command === 'stop' || m.content_data?.command === 'start')\n  );\n\n  if (clearCommand) {\n    console.log(`[COMMAND] Found /${clearCommand.content_data.command}, checking if it clears context`);\n    \n    const lastPendingMessage = recentMessages.find(m =>\n      m.message_type === 'system' && \n      m.content_data && \n      (m.content_data.pending_photo || m.content_data.pending_forwarded)\n    );\n    \n    if (lastPendingMessage) {\n      const commandTime = new Date(clearCommand.created_at).getTime();\n      const pendingTime = new Date(lastPendingMessage.created_at).getTime();\n      \n      if (commandTime > pendingTime) {\n        console.log(`[COMMAND] Clearing implicit context (/${clearCommand.content_data.command} is newer than pending)`);\n        \n        return {\n          json: {\n            user_message: messageData.text,\n            chat_id: messageData.chat_id,\n            message_id: messageData.message_id,\n            user_id: messageData.user_id,\n            reply_to_message_id: messageData.reply_to_message_id,\n            context: {\n              context_type: null,\n              content: null,\n              task_id: null,\n              has_forwarded: false,\n              forwarded_content: null,\n              has_photo: false,\n              photo_file_id: null\n            }\n          }\n        };\n      } else {\n        console.log(`[COMMAND] /${clearCommand.content_data.command} is older than pending, ignoring`);\n      }\n    } else {\n      console.log(`[COMMAND] No pending context found, nothing to clear`);\n    }\n  }\n}\n\nif (recentMessages.length > 0) {\n  const lastSystemMessage = recentMessages\n    .filter(m => m.message_type === 'system' && m.content_data)\n    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];\n\n  if (lastSystemMessage) {\n    if (lastSystemMessage.content_data.pending_photo) {\n      const photoMessageId = lastSystemMessage.content_data.pending_photo;\n      const photoMessage = recentMessages.find(m => m.telegram_message_id === photoMessageId);\n\n      if (photoMessage && photoMessage.content_data) {\n        context.context_type = 'photo';\n        context.has_photo = true;\n        context.photo_file_id = photoMessage.content_data.photo_file_id;\n      }\n    }\n    else if (lastSystemMessage.content_data.pending_forwarded) {\n      const forwardedMessageId = lastSystemMessage.content_data.pending_forwarded;\n      const forwardedMessage = recentMessages.find(m => m.telegram_message_id === forwardedMessageId);\n\n      if (forwardedMessage && forwardedMessage.content_data) {\n        context.context_type = 'forwarded';\n        context.has_forwarded = true;\n        context.forwarded_content = {\n          text: forwardedMessage.content_data.text,\n          forwarded_date: forwardedMessage.content_data.forwarded_date\n        };\n      }\n    }\n  }\n}\n\nif (!context.context_type && !messageData.reply_to_message_id) {\n  const allItems = $input.all();\n  \n  const lastSentMessage = allItems\n    .filter(item => \n      item.json?.message_type && \n      (item.json.message_type === 'longread' || item.json.task_id) &&\n      item.json.created_at\n    )\n    .sort((a, b) => new Date(b.json.created_at) - new Date(a.json.created_at))[0];\n  \n  if (lastSentMessage) {\n    console.log(`[TEMPORAL PROXIMITY] Found sent_message: ${lastSentMessage.json.message_type}`);\n    \n    if (lastSentMessage.json.message_type === 'longread') {\n      context.context_type = 'longread';\n      context.content = lastSentMessage.json.content_data;\n      if (typeof context.content === 'string') {\n        try {\n          context.content = JSON.parse(context.content);\n        } catch (e) {\n          console.log('[TEMPORAL PROXIMITY] Failed to parse longread:', e);\n        }\n      }\n    }\n    else if (lastSentMessage.json.task_id) {\n      const taskData = allItems.find(item => \n        item.json?.id === lastSentMessage.json.task_id &&\n        item.json?.department === 'research'\n      );\n      \n      if (taskData) {\n        context.context_type = 'research';\n        context.task_id = lastSentMessage.json.task_id;\n        context.content = taskData.json;\n      }\n    }\n  }\n}\n\nif (!context.context_type && messageData.reply_to_message_id) {\n  const allItems = $input.all();\n  const replyTarget = allItems.find(item => \n    item.json?.telegram_message_id === messageData.reply_to_message_id\n  );\n\n  if (replyTarget) {\n    console.log(`[REPLY CONTEXT] Found reply target: ${replyTarget.json.message_type}, task_id: ${replyTarget.json.task_id}`);\n    \n    if (replyTarget.json.message_type === 'longread') {\n      context.context_type = 'longread';\n      context.content = replyTarget.json.content_data;\n      if (typeof context.content === 'string') {\n        try {\n          context.content = JSON.parse(context.content);\n        } catch (e) {\n          console.log('[REPLY CONTEXT] Failed to parse longread content:', e);\n        }\n      }\n    }\n    else if (replyTarget.json.task_id) {\n      context.context_type = 'task';\n      context.task_id = replyTarget.json.task_id;\n    }\n    // ✅ НОВОЕ: Обработка POST в allItems\n    else if (replyTarget.json.message_type === 'post') {\n  context.context_type = 'post';\n  context.content = {\n    post_text: replyTarget.json.content_data?.text || '',  // ✅ Исправлено!\n    photo_file_id: replyTarget.json.content_data?.photo_file_id || null,\n    version: replyTarget.json.content_data?.version || 1,\n    sources: replyTarget.json.content_data?.sources || []\n  };\n}\n  } else {\n    console.log(`[REPLY CONTEXT] Reply target not found: message_id ${messageData.reply_to_message_id}`);\n  }\n}\n\nreturn {\n  json: {\n    user_message: messageData.text,\n    chat_id: messageData.chat_id,\n    message_id: messageData.message_id,\n    user_id: messageData.user_id,\n    reply_to_message_id: messageData.reply_to_message_id,\n    context: context\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Prepare AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// ============================================\n// USER PROMPT: ТОЛЬКО ФАКТЫ!\n// ============================================\n\nlet userPrompt = `**Запрос пользователя:**\n\"${data.user_message || data.text}\"\n`;\n\n// Контекст (только факты)\nif (data.context && data.context.context_type) {\n  \n  userPrompt += `\\n**Контекст:**\\n`;\n  \n  if (data.context.context_type === 'photo') {\n    userPrompt += `- Тип: фото\\n`;\n    userPrompt += `- Photo ID: ${data.context.photo_file_id}\\n`;\n  }\n  \n  else if (data.context.context_type === 'forwarded') {\n    userPrompt += `- Тип: пересланное сообщение\\n`;\n    userPrompt += `- Текст: \"${data.context.forwarded_content.text}\"\\n`;\n  }\n  \n  else if (data.context.context_type === 'longread') {\n    userPrompt += `- Тип: лонгрид\\n`;\n    if (data.context.content && data.context.content.news_list) {\n      userPrompt += `- Доступные новости:\\n`;\n      userPrompt += data.context.content.news_list\n        .map(n => `  ${n.id}. ${n.title}`)\n        .join('\\n') + '\\n';\n    }\n  }\n  \n  else if (data.context.context_type === 'task') {\n    userPrompt += `- Тип: существующая задача\\n`;\n    userPrompt += `- Task ID: ${data.context.task_id}\\n`;\n  }\n  \n  else {\n    userPrompt += `- Тип: ${data.context.context_type}\\n`;\n  }\n  \n} else {\n  userPrompt += `\\n**Контекст:** отсутствует\\n`;\n}\n\n// ============================================\n// БЕЗОПАСНОЕ ОБРАЩЕНИЕ К LOAD ACTIVE TASKS\n// ============================================\n\nlet completedTasks = [];\n\ntry {\n  const loadTasksData = $('Load Active Tasks').all();\n  if (loadTasksData && loadTasksData.length > 0) {\n    completedTasks = loadTasksData;\n  }\n} catch (e) {\n  // Load Active Tasks не выполнялась или вернула ошибку\n  completedTasks = [];\n}\n\n// Фильтруем валидные задачи\nconst validTasks = completedTasks.filter(task => task.json && task.json.id);\n\n// Completed задачи (доступны для iterative cycles)\nif (validTasks.length > 0) {\n  userPrompt += `\\n**Задачи со статусом completed (доступны для task_update):**\\n`;\n  validTasks.forEach(task => {\n    const t = task.json;\n    userPrompt += `- ${t.department}: \"${t.initial_prompt}\" (ID: ${t.id}, обновлено: ${new Date(t.updated_at).toLocaleString('ru-RU')})\\n`;\n  });\n} else {\n  userPrompt += `\\n**Задачи со статусом completed:** нет\\n`;\n}\n\n// ============================================\n// ИЗВЛЕКАЕМ ДАННЫЕ ДЛЯ ORIGINAL_DATA\n// ============================================\n\nconst completedTasksData = validTasks.map(task => task.json);\n\n// ============================================\n// ВОЗВРАЩАЕМ С COMPLETED_TASKS\n// ============================================\n\nreturn {\n  json: {\n    user_prompt: userPrompt.trim(),\n    original_data: {\n      ...data,\n      completed_tasks: completedTasksData  // ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ\n    }\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Validate AI Output",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "intent-check",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.output.intent }}",
+              "rightValue": ""
+            },
+            {
+              "id": "department-check-if-new-task",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.output.intent === 'new_task' ? ($json.output.department || '') : 'ok' }}",
+              "rightValue": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Error to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        200
+      ],
+      "parameters": {
+        "text": "Брат, не понял запрос. Попробуй ещё раз.",
+        "chatId": "={{ $('When Called by Жора').first().json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        400,
+        0
+      ],
+      "parameters": {
+        "text": "={{ $json.user_prompt }}",
+        "options": {
+          "systemMessage": "=Ты — Квалификатор для SMM агентной системы. Определяй INTENT и DEPARTMENT.\n\n## ТЕРМИНОЛОГИЯ\n\n**Статусы задач (как работает в БД):**\n\n| Статус | Когда задача в этом статусе | Твоё действие |\n|--------|------------------------------|---------------|\n| `created` | Ты только что создал задачу | ❌ task_update НЕВОЗМОЖЕН |\n| `in_progress` | Department агент работает над задачей | ❌ task_update НЕВОЗМОЖЕН |\n| `completed` | Результат v1 отправлен пользователю | ✅ task_update ВОЗМОЖЕН |\n| `failed` | Ошибка выполнения задачи | ❌ task_update НЕВОЗМОЖЕН |\n\n**Для iterative cycles:** Ты получаешь задачи со статусом `completed` в контексте.\n\n**Логика:** Если user ВИДЕЛ результат (v1 отправлен в Telegram) → можешь определить `intent = task_update` БЕЗ reply.\n\n**Контексты, которые ты получаешь:**\n- **completed_tasks** = задачи со статусом `completed` из БД (доступны для task_update)\n- **sent_messages** = системные сообщения (research/longread документы), сохранённые для reply handling\n  - Структура: `{task_id, version_index, file_id, message_id, timestamp}`\n  - Используешь для: reply context и temporal proximity при неоднозначных запросах\n- **recent_messages** = 3 последних сообщения из истории чата\n  - Анализируешь для определения: pending_photo, pending_forwarded (implicit context)\n\n## INTENT типы\n- **new_task** — новая задача\n- **task_update** — правка существующей задачи (только для задач со статусом `completed` или через reply)\n- **dialogue** — уточняющий вопрос\n\n## DEPARTMENT типы\n- **copywriting** — посты (текстовые, поддерживает iterative cycles)\n- **research** — глубокое исследование темы (Jina Deep Search + SerpAPI + синтез), возвращает report\n- **image_gen** — создание изображений из текста (поддерживает iterative cycles)\n- **image_edit** — редактирование существующего фото (поддерживает iterative cycles)\n- **longwriter** — лонгриды из голосовых/заметок (GitHub Gist + развёрнутый текст)\n- **reels_ideas** — сохранение идей из ссылок (YouTube/TikTok/Instagram reels → транскрипт → идея в базе)\n\n**Triggers для department routing:**\n- \"напиши пост\", \"создай пост\" → **copywriting**\n- \"исследуй\", \"разбери\", \"проанализируй рынок\" → **research**\n- \"сгенерируй картинку\", \"нарисуй\" → **image_gen**\n- (фото приложено) + \"поправь\" → **image_edit**\n- \"напиши лонгрид\", \"развёрнутая статья\", \"подробно раскрой\" → **longwriter**\n- (любая ссылка URL в сообщении) ИЛИ \"сохрани идею\", \"запиши мысль\" → **reels_ideas**\n**Triggers для department routing:**\n- \"напиши пост\", \"создай пост\", \"сделай карточку\" → **copywriting**\n- \"исследуй\", \"разбери\", \"расскажи про\", \"проанализируй рынок\" → **research**\n- \"сгенерируй картинку\", \"нарисуй\", \"create image\" → **image_gen**\n- (фото приложено) + \"исправь\", \"поправь\" → **image_edit**\n\n\n**Longread** — автопилот новостная рассылка (НЕ department, автоматическая система)\n\n---\n\n## ПРАВИЛО #0: PHOTO PRESENCE (наивысший приоритет)\n\n**Если ТЕКУЩЕЕ сообщение содержит фото:**\n→ ВСЕГДА `intent = new_task`, `department = image_edit`\n→ ИГНОРИРОВАТЬ любой context (completed_tasks, pending_photo, все контексты)\n→ Фото в сообщении = сброс всего, начинаем заново\n\n**Исключение:** Reply БЕЗ фото в текущем сообщении → используй reply context (ПРАВИЛО #1)\n\n---\n\n## ПРАВИЛО #1: REPLY PRIORITY\n\n**Если есть reply на сообщение (БЕЗ фото в текущем сообщении):**\n→ `intent = task_update`\n→ `target_task_id` = из reply context (sent_messages или completed_tasks)\n→ ИГНОРИРОВАТЬ все другие контексты\n\n**ИСКЛЮЧЕНИЕ:** Reply на research/longread документы:\n- Reply + \"Напиши пост на основе\" → `new_task`, `copywriting` (использовать документ как source)\n- Reply + \"Переделай с другим фокусом\" → `new_task`, `research` (создать новый research)\n- **Причина:** Research документы НЕ редактируются после создания\n- **Твоё решение:** Анализируй запрос семантически — \"Напиши пост\" = copywriting, \"Переделай\" = новый research\n\n**Приоритет:** Reply > Completed Tasks > Implicit Context\n\n---\n\n## ПРАВИЛО #2: NEW_TASK vs TASK_UPDATE (Copywriting)\n\n**КРИТИЧНО:** Отличай создание нового контента от редактирования существующего.\n\n### Copywriting: new_task vs task_update (БЕЗ reply)\n\n**new_task если:**\n- Запрос содержит **полную инструкцию**: \"Напиши пост про X\", \"Создай пост о Y\"\n- Запрос про **новый топик** (даже если идентичен completed task)\n- Ключевые глаголы: \"Напиши\", \"Создай\", \"Сделай пост\"\n\n**task_update если:**\n- Запрос содержит **команду редактирования**: \"Перепиши\", \"Добавь\", \"Убери\", \"Измени\"\n- Запрос содержит **изменение стиля/подачи**: \"попробуй по-другому\", \"давай креативнее\", \"переделай стиль\", \"сделай проще\"\n- Запрос **обрывочный**: \"Добавь эмодзи\", \"Сделай короче\", \"А давай иначе\" (требует контекст)\n- Ключевые глаголы: \"Перепиши\", \"Добавь\", \"Убери\", \"Измени\", \"Сделай короче\", \"Попробуй\", \"Давай\", \"Переделай\"\n\n**ПРИМЕРЫ:**\n\n✅ new_task:\n- \"Напиши пост про новый iPhone\" → new_task\n- \"Создай пост о blockchain\" → new_task\n- \"Напиши пост о 4 новости\" (completed: \"Напиши пост о 4 новости\") → new_task\n  - **Причина:** Полная инструкция = новый пост, не редактирование\n\n✅ task_update:\n- \"Перепиши короче\" (completed: copywriting) → task_update\n- \"Добавь раздел про Claude\" (completed: copywriting) → task_update\n- \"Убери воду\" (completed: copywriting) → task_update\n- \"Попробуй креативнее донести\" (completed: copywriting) → task_update\n- \"Давай по-другому, проще\" (completed: copywriting) → task_update\n- \"Переделай подачу для простого читателя\" (completed: copywriting) → task_update\n\n❌ ТИПИЧНАЯ ОШИБКА:\n- User: \"Напиши пост о X\"\n- Completed: \"Напиши пост о X\"\n- НЕПРАВИЛЬНО: task_update ← User хочет НОВЫЙ пост!\n- ПРАВИЛЬНО: new_task\n\n**Ключевое отличие:**\n- \"Напиши\" / \"Создай\" = **создание** нового → new_task\n- \"Перепиши\" / \"Добавь\" / \"Убери\" = **редактирование** существующего → task_update\n\n### Неявные запросы с completed_tasks (ПРИОРИТЕТ #3)\n\n**Если:**\n- Запрос содержит **неявную команду редактирования**: \"попробуй\", \"давай\", \"а как насчет\"\n- `context.context_type = null` (нет reply, нет implicit context)\n- `completed_tasks` содержит задачи по department\n\n**ТО:**\n- `intent = task_update`\n- `target_task_id` = последняя задача по department (самая свежая по `updated_at`)\n\n**ПРИМЕРЫ:**\n\n✅ task_update (неявный):\n- User: \"А попробуй креативно донести\"\n- completed_tasks: [copywriting задача от 16:08:26, copywriting задача от 15:29:43]\n- Результат: `task_update`, `target_task_id` = copywriting задача от 16:08:26 (самая свежая)\n\n✅ task_update (неявный):\n- User: \"Давай по-другому\"\n- completed_tasks: [copywriting задача]\n- Результат: `task_update`, `target_task_id` = copywriting задача\n\n❌ new_task (явная инструкция):\n- User: \"Напиши пост про X\"\n- completed_tasks: [copywriting задача]\n- Результат: `new_task` (полная инструкция = новый пост)\n\n**Ключевое отличие:**\n- \"попробуй\", \"давай\", \"а как насчет\" = **правка стиля** существующего → task_update с target_task_id\n- \"Напиши\", \"Создай\" = **создание** нового → new_task\n\n---\n\n## TEMPORAL PROXIMITY (Принцип Естественного Общения)\n\n**Философия:** Общение с системой как с человеком. Если недавно отправил контент, следующее сообщение касается его.\n\n**Принцип:** Что последнее отправлено (пользователем или системой) → то в приоритете\n\n**Иерархия контекстов (по убыванию приоритета):**\n\n1. **ПРАВИЛО #0:** Фото в текущем сообщении (АБСОЛЮТНЫЙ приоритет - сброс всего)\n2. **ПРАВИЛО #1:** Reply (ВЫСОКИЙ приоритет, исключение: research/longread)\n3. **ПРАВИЛО #2:** NEW_TASK vs TASK_UPDATE для Copywriting (различай создание vs редактирование)\n4. **Временная близость:** Что последнее - pending context или sent_messages (по timestamp)\n   - Если последнее от пользователя = pending_photo → `image_edit`\n   - Если последнее от пользователя = pending_forwarded → `copywriting`/`research`\n   - Если последнее от системы = sent_messages → использовать документ как source\n5. **Completed tasks:** проверка task_update по department (если нет более свежего контекста)\n\n### Примеры временной близости:\n\n**G1: pending_photo + pending_forwarded (оба есть)**\n- User: Forwarded (10:00) → Photo (10:05) → \"Сделай об этом\"\n→ Photo позже (10:05) → `image_edit`\n\n**G2: pending_photo + sent_messages**\n- System: Research отправлен (10:00) → User: Photo (10:05) → \"Используй это\"\n→ Photo от пользователя позже (10:05) → `image_edit`\n\n**F8: sent_messages + неоднозначный запрос**\n- System: Research отправлен (10:05) → User: \"Напиши пост про это\" (10:06)\n→ Последнее от системы = research → `copywriting` с source=research\n\n**F10: Multiple sent_messages**\n- System: Longread (10:00) → Research (10:05) → User: \"Напиши про это\" (10:06)\n→ Последний sent_message = research (10:05) → `copywriting` с source=research\n\n**Твоё решение:** Анализируй семантически — \"про это\" указывает на ближайший контекст по времени\n\n---\n\n## IMPLICIT CONTEXT (pending_photo, pending_forwarded)\n\n**Примечание:** Команды /stop и /start обрабатываются ДО тебя и очищают implicit context (ты их не видишь).\n\n### Однозначные запросы (ИГНОРИРОВАТЬ implicit context):\n- Содержит URL: \"https://apple.com напиши пост\"\n- Полная инструкция: \"Напиши пост о новом iPhone\"\n- Команда создания: \"Нарисуй робота\", \"Создай видео\"\n\n### Неоднозначные запросы (ИСПОЛЬЗОВАТЬ implicit context + temporal proximity):\n- Местоимения: \"Убери это\", \"Напиши об этом\"\n- Действия без объекта: \"Убери фон\", \"Измени цвет\"\n\n**Если pending_photo И запрос неоднозначен:**\n→ `department = image_edit`, `intent = new_task`\n\n**Если pending_forwarded И запрос неоднозначен:**\n→ `department = copywriting` или `research` (по смыслу), `intent = new_task`\n\n**Если оба pending:** Выбирай по timestamp (что пользователь отправил позже)\n\n**Если pending + sent_messages:** Выбирай по timestamp (что последнее - от пользователя или системы)\n\nПримеры:\n- \"Напиши об этом\" + forwarded (последнее) → copywriting\n- \"Исследуй эту тему\" + forwarded (последнее) → research\n- \"Напиши про это\" + sent_messages research (последнее от системы) → copywriting с source\n\n---\n\n## VISUAL CONTENT RULES\n\n### IMAGE_EDIT (редактирование существующего)\n\n**Iterative cycles (БЕЗ фото, БЕЗ reply):**\n- Есть задача со статусом `completed` (department=image_edit, v1 отправлен)\n- **Можно использовать task_update для:**\n  - ✅ Полные инструкции: \"Добавь кота слева\", \"Убери синий фон\"\n  - ✅ Обрывочные команды: \"Убери фон\", \"Сделай ярче\", \"Измени цвет\"\n  - **Причина:** Агент ВИДИТ историю через `versions` массив и знает контекст\n  \n- **НЕ используй task_update для:**\n  - ❌ Совсем пустые: \"Сделай\", \"Хм...\", \"А можно?\"\n  - ❌ Неоднозначные: \"Добавь это\" (что \"это\"?)\n  \n→ `intent = task_update`\n\n**Примеры:**\n- \"Убери фон\" (completed: image_edit v1) → task_update ✅\n- \"Сделай ярче\" (completed: image_edit v1) → task_update ✅\n- \"Добавь кота\" (completed: image_edit v1) → task_update ✅\n- \"Сделай\" (completed: image_edit v1) → dialogue ❌\n\n### IMAGE_GEN (создание из текста)\n\n**Iterative cycles (БЕЗ фото, БЕЗ reply):**\n- Есть задача со статусом `completed` (department=image_gen, v1 отправлен)\n- **Можно использовать task_update для:**\n  - ✅ Полные инструкции: \"Сделай робота зелёным\", \"Добавь текст 'Hello'\"\n  - ✅ Обрывочные команды: \"Сделай ярче\", \"Измени стиль\"\n  - **Причина:** Агент ВИДИТ previous_prompt через `versions` массив\n  \n- **НЕ используй task_update для:**\n  - ❌ Совсем пустые: \"Сделай\", \"Измени\"\n  - ❌ Неоднозначные: \"Добавь текст\" (какой текст?)\n\n→ `intent = task_update`\n\n**Примеры:**\n- \"Сделай робота зелёным\" (completed: image_gen v1) → task_update ✅\n- \"Сделай ярче\" (completed: image_gen v1) → task_update ✅\n- \"Измени стиль на минимализм\" (completed: image_gen v1) → task_update ✅\n- \"Сделай\" (completed: image_gen v1) → dialogue ❌\n\n### VIDEO_GEN (создание видео)\n\n**Iterative cycles (БЕЗ reply):**\n- Аналогично IMAGE_GEN\n- Можно использовать обрывочные команды: \"Сделай быстрее\", \"Добавь музыку\"\n- НЕ используй совсем пустые: \"Сделай\", \"Измени\"\n---\n\n## RESEARCH RULES (важное исключение)\n\n**КРИТИЧЕСКИ ВАЖНО:** Research документы НЕ редактируются после создания.\n\n### Сценарии с research:\n\n**Completed research + команда редактирования:**\n- \"Добавь раздел про AI\" (completed: research) → `dialogue`\n- Бот: \"Research документы не редактируются после создания. Вы хотите создать новый research с другим фокусом?\"\n\n**Reply на research:**\n- Reply + \"Напиши пост на основе\" → `new_task`, `copywriting` (использовать документ как source)\n- Reply + \"Переделай с фокусом на коммерческое применение\" → `new_task`, `research` (создать новый)\n- **Твоё решение:** Анализируй семантически — \"Напиши пост\" = copywriting, \"Переделай\" = новый research\n\n**Research в sent_messages + неоднозначный запрос:**\n- \"Напиши про это\" (sent_messages: research последний) → `new_task`, `copywriting` с source=research\n\n**Причина архитектуры:** Research создаёт PDF/Google Doc один раз, iterative cycle невозможен.\n\n___\n\n## POST RULES (source для image_gen)\n\n**Reply на POST:**\n- Reply + \"Создай изображение\", \"Нарисуй картинку\", \"Сделай фото к нему\" → `new_task`, `image_gen`\n- **source_data.type = 'post'** → текст поста передается как контекст для генерации\n- **Твоё решение:** \"Сделай фото\" = image_gen (создание изображения на основе текста поста)\n\n**Reply на POST copywriting task:**\n- Reply + \"Перепиши короче\" → `task_update`, `copywriting` (правка самого поста)\n- **Отличие:** Запрос про ТЕКСТ поста → copywriting, запрос про ИЗОБРАЖЕНИЕ → image_gen\n\nПримеры:\n- [REPLY на пост] \"Создай изображение для этого поста\" → new_task, image_gen\n- [REPLY на пост] \"Нарисуй картинку к нему\" → new_task, image_gen\n- [REPLY на пост copywriting task] \"Перепиши короче\" → task_update, copywriting\n\n---\n\n## TASK_UPDATE LOGIC\n\n### Copywriting (обрывочные запросы разрешены)\n\n**Используй task_update если:**\n- НЕТ фото, НЕТ reply\n- Есть задача со статусом `completed` (department=copywriting)\n- Запрос содержит **команду редактирования**: \"Перепиши\", \"Добавь\", \"Убери\", \"Измени\"\n- ❌ НЕ для полных инструкций: \"Напиши пост про X\" → new_task (см. ПРАВИЛО #2)\n\nПримеры:\n- \"Перепиши\" (completed: copywriting) → task_update ✅\n- \"Добавь про Claude\" (completed: copywriting про GPT) → task_update ✅\n- \"Убери воду\" (completed: copywriting) → task_update ✅\n- \"Напиши пост о X\" (completed: \"Напиши пост о X\") → new_task ✅\n\n**НЕ task_update:**\n- \"Напиши пост про blockchain\" → new_task (новый топик)\n\n**Почему обрывочные OK:** Copywriting агент получит initial_prompt + все версии → поймёт контекст\n\n### Visual Content (iterative cycles)\n\n**Используй task_update если:**\n- НЕТ фото, НЕТ reply\n- Есть задача со статусом `completed` (department=image_edit/image_gen/video_gen)\n- Запрос содержит **команду** (даже обрывочную): \"Убери фон\", \"Сделай ярче\", \"Добавь кота слева\"\n- **Причина:** Агенты ВИДЯТ историю через `versions` массив\n\n**НЕ task_update (→ dialogue):**\n- \"Сделай\" (совсем пустое) → dialogue (\"Что именно сделать?\") ❌\n- \"Добавь это\" (неоднозначное) → dialogue (\"Что именно добавить?\") ❌\n\n**Почему обрывочные OK для Visual Content:** \n- Image Edit/Gen получат `versions` массив с полной историей\n- Они ЗНАЮТ какое изображение (file_id из последней версии)\n- Они ЗНАЮТ предыдущую инструкцию (instruction/previous_prompt)\n\n---\n\n## DIALOGUE\n\n**Используй dialogue ТОЛЬКО если:**\n- Обрывочное: \"Сделай\", \"Хм...\", \"А можно?\"\n- Вопрос без контекста: \"Сколько стоит?\", \"Когда готово?\"\n- Общий вопрос: \"Что умеешь?\"\n- Неоднозначное БЕЗ context: \"Сделай это синим\" (нет completed_tasks, нет pending)\n\n**НЕ dialogue:**\n- URL + действие → new_task\n- \"Убери фон\" + photo context → new_task (image_edit)\n\n---\n\n## ПРИОРИТЕТЫ ОБРАБОТКИ\n\n**Полная иерархия обработки контекстов:**\n\n1. **ПРАВИЛО #0: PHOTO PRESENCE** (АБСОЛЮТНЫЙ приоритет)\n   - Фото в текущем сообщении → `image_edit`, сброс всего контекста\n\n2. **ПРАВИЛО #1: REPLY PRIORITY** (ВЫСОКИЙ приоритет)\n   - Reply → `task_update` целевой задачи (результат уже отправлен пользователю)\n   - **Исключение:** Reply на research/longread → `new_task` (copywriting или research по смыслу)\n\n3. **ПРАВИЛО #2: NEW_TASK vs TASK_UPDATE** (КРИТИЧНО для Copywriting)\n   - \"Напиши\" / \"Создай\" = **new_task** (создание нового)\n   - \"Перепиши\" / \"Добавь\" / \"Убери\" = **task_update** (редактирование)\n\n4. **Однозначные запросы** (игнорировать все контексты)\n   - URL в запросе → new_task\n   - Полная инструкция → new_task\n   - Команда создания (image_gen/video_gen) → new_task\n\n5. **Неоднозначные запросы + Temporal Proximity:**\n   - Проверить timestamp: pending context vs sent_messages\n   - Что последнее (от пользователя или системы) → то использовать\n   - **Логика:** pending_photo vs pending_forwarded vs sent_messages (выбирай по timestamp)\n\n6. **Tasks со статусом `completed`** (если нет более свежего контекста)\n   - **Copywriting:** Команды редактирования (\"Перепиши\", \"Добавь\") → task_update\n   - **Visual Content:** Требуется полная инструкция (\"Добавь кота слева\") → task_update\n   - **Visual Content:** Обрывочные запросы (\"Добавь\") → dialogue\n   - **Research:** НЕ редактируется → dialogue\n\n7. **Dialogue** (если ничего не подошло)\n   - Обрывочный запрос без контекста\n   - Ambiguous request без задач со статусом `completed`\n\n**Ключевой принцип:** Анализируй запрос семантически через AI, не только rigid rules.\n\n---\n\n## EDGE CASES\n\n**Ambiguous без context:**\n- \"Сделай это синим\" (нет completed_tasks, нет pending context) → dialogue\n\n**URL с photo context:**\n- \"https://example.com обработай\" + pending_photo → new_task, copywriting/research (игнорировать pending_photo)\n\n**Reply на старую версию:**\n- Reply на v1 (когда есть v2) → task_update v1 (reply = explicit intent)\n\n**Фото + completed task:**\n- [фото] (completed: image_edit v2) → new_task (ПРАВИЛО #0 сбрасывает iterative cycle)\n\n**Фото + любой caption:**\n- [фото] \"Нарисуй на основе этого робота\" → image_edit (ПРАВИЛО #0 абсолютно)\n- [фото] \"Создай похожее\" → image_edit (ПРАВИЛО #0 абсолютно)\n- **Причина:** Nano Banana может полностью перерисовать изображение, фото ВСЕГДА = image_edit\n\n**Reply + URL:**\n- [REPLY] + URL в тексте → task_update (ПРАВИЛО #1: reply приоритетнее URL)\n\n**Две задачи со статусом `completed` (разные departments):**\n- Выбирай по semantic match с запросом\n- Если ambiguous → dialogue (\"Какую задачу обновить?\")\n\n**C4: Reply на copywriting + фото в текущем сообщении:**\n- [REPLY на copywriting] + [фото] → dialogue\n- Бот: \"Копирайтинг — текстовая задача. Вы хотите: 1) Отредактировать это фото отдельно? 2) Использовать фото как reference для текста?\"\n- **Причина:** Copywriting не требует фото, некорректная комбинация\n\n**F9: Completed research + команда редактирования:**\n- \"Добавь раздел про AI\" (completed: research) → dialogue\n- Бот: \"Research документы не редактируются после создания. Вы хотите создать новый research с другим фокусом?\"\n- **Причина:** Research НЕ редактируется, только создание нового\n\n**F11: Reply на research + \"Переделай с другим фокусом\":**\n- [REPLY на research] \"Переделай с фокусом на коммерческое применение\" → new_task, research\n- **Твоё решение:** Анализируй семантически — \"Переделай\" = создать новый research, не пост\n- **Альтернатива:** \"Напиши пост на основе\" → new_task, copywriting (использовать документ как source)\n\n___\n\n\n## ФОРМАТ ОТВЕТА\n\n```json\n{\n  \"intent\": \"new_task | task_update | dialogue\",\n  \"department\": \"copywriting | research | image_gen | image_edit | video_gen | null\",\n  \"user_request\": \"запрос пользователя\",\n  \"target_task_id\": \"uuid или null\",\n  \"reasoning\": \"краткое объяснение\"\n}\n```\n\n### ПРИМЕРЫ OUTPUT\n\n**Пример 1: Неявный task_update с completed_tasks (ПРИОРИТЕТ #3)**\n\n```json\n{\n  \"intent\": \"task_update\",\n  \"department\": \"copywriting\",\n  \"user_request\": \"А попробуй креативно донести. Суть супер, но подачу попробуй сделать как для быдла. Чтобы даже маленький предприниматель из глубинки понял для чего ему это может быть полезным.\",\n  \"extracted_news_id\": null,\n  \"target_task_id\": \"<uuid>\",\n  \"reasoning\": \"Запрос содержит неявную команду редактирования ('попробуй креативно донести', 'подачу попробуй сделать'). Контекст пустой (нет reply), но есть completed tasks по department=copywriting. Применяю ПРИОРИТЕТ #3: выбираю последнюю copywriting задачу (ID: 686693e1..., updated_at: 16:08:26) и возвращаю target_task_id для task_update.\"\n}\n```\n\n**Пример 2: Явный new_task с полной инструкцией**\n\n```json\n{\n  \"intent\": \"new_task\",\n  \"department\": \"copywriting\",\n  \"user_request\": \"Напиши пост про новый iPhone 16\",\n  \"extracted_news_id\": null,\n  \"target_task_id\": null,\n  \"reasoning\": \"Запрос содержит полную инструкцию с явным глаголом 'Напиши'. Это создание нового контента, а не редактирование существующего. Completed tasks игнорируются, так как запрос явно указывает на новую задачу.\"\n}\n```\n\n**Пример 3: task_update с reply контекстом**\n\n```json\n{\n  \"intent\": \"task_update\",\n  \"department\": \"copywriting\",\n  \"user_request\": \"Добавь раздел про конкурентов\",\n  \"extracted_news_id\": null,\n  \"target_task_id\": null,\n  \"reasoning\": \"Запрос содержит команду редактирования 'Добавь'. Reply контекст указывает на существующую задачу. task_id будет получен из reply context в Prepare Update Task Data (ПРИОРИТЕТ #2).\"\n}\n```\n"
+        },
+        "promptType": "define",
+        "hasOutputParser": true
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "<uuid>",
+      "name": "Load Recent Messages",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        200
+      ],
+      "parameters": {
+        "limit": 3,
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "operation": "getAll",
+        "filterType": "string",
+        "filterString": "=telegram_chat_id=eq.{{ $json.chat_id }}&order=created_at.desc&limit=3",
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        500,
+        -200
+      ],
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"intent\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"new_task\",\n        \"task_update\",\n        \"dialogue\"\n      ]\n    },\n    \"department\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"enum\": [\n        \"copywriting\",\n        \"research\",\n        \"image_gen\",\n        \"image_edit\",\n        \"longwriter\",\n        \"reels_ideas\",\n        null\n      ]\n    },\n    \"user_request\": {\n      \"type\": \"string\"\n    },\n    \"target_task_id\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ]\n    },\n    \"reasoning\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"intent\",\n    \"user_request\",\n    \"reasoning\"\n  ]\n}"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "GPT-4o",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        300,
+        -200
+      ],
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "<credential-id>",
+          "name": "Openai Account"
+        }
+      }
+    },
+    {
+      "id": "build-final-output-001",
+      "name": "Build Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Merge AI decision with original_data so downstream Action sub-WF has chat_id/user_id/context\nconst aiOutput = $input.first().json.output;\nconst originalData = $('Prepare AI Prompt').first().json.original_data;\nreturn { json: { output: aiOutput, original_data: originalData } };"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Жора": {
+      "main": [
+        [
+          {
+            "node": "Check if Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Reply": {
+      "main": [
+        [
+          {
+            "node": "Load Reply Context (RPC)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Active Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Recent Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Recent Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Active Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Reply Context (RPC)": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Active Tasks": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Recent Messages": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Extract Specific Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Specific Context": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Validate AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate AI Output": {
+      "main": [
+        [
+          {
+            "node": "Build Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Final Output": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "errorWorkflow": "O6BjG1ublqWZ1KWk",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

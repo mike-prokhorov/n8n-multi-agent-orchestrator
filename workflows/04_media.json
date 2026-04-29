@@ -1,0 +1,407 @@
+{
+  "name": "[HUB] Жора Media",
+  "description": null,
+  "nodes": [
+    {
+      "id": "media-trigger",
+      "name": "When Called by Жора",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "media-router",
+      "name": "Route Media Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "forward",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "rm-fwd",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json._media_type }}",
+                    "rightValue": "forward"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "photo",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "rm-pht",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json._media_type }}",
+                    "rightValue": "photo"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Forwarded Temp",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -100
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "forwarded_temp"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({text: $json.forwarded_content.text, forwarded_date: $json.forwarded_content.forward_date}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Photo Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const photo = $json.photo;\nconst chatId = $json.chat_id;\nconst messageId = $json.message_id;\n\nif (!photo || !Array.isArray(photo) || photo.length === 0) {\n  throw new Error('No photo found in message');\n}\n\nconst photoFileId = photo[photo.length - 1].file_id;\n\nreturn {\n  json: {\n    chat_id: chatId,\n    message_id: messageId,\n    photo_file_id: photoFileId,\n    action: 'save_and_ask'\n  }\n};"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Photo Question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        100
+      ],
+      "parameters": {
+        "text": "Получил фото. Что сделать?",
+        "chatId": "={{ $('Photo Handler').first().json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Photo",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        400,
+        100
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "photo_temp"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({photo_file_id: $json.photo_file_id}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Photo Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        800,
+        100
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.result.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $('Photo Handler').first().json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "system"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({pending_photo: $('Photo Handler').first().json.message_id, question: 'Получил фото. Что нужно сделать?'}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        -100
+      ],
+      "parameters": {
+        "text": "Вижу пересланное. Что с этим сделать?",
+        "chatId": "={{ $('When Called by Жора').first().json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Forwarded Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        600,
+        -100
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.result.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $('When Called by Жора').first().json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "system"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({pending_forwarded: $('When Called by Жора').first().json.message_id, question: 'Сохранил пересланное сообщение. Что нужно сделать?'}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Жора": {
+      "main": [
+        [
+          {
+            "node": "Route Media Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Media Type": {
+      "main": [
+        [
+          {
+            "node": "Save Forwarded Temp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Photo Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Forwarded Temp": {
+      "main": [
+        [
+          {
+            "node": "Send Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Question": {
+      "main": [
+        [
+          {
+            "node": "Save Forwarded Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Photo Handler": {
+      "main": [
+        [
+          {
+            "node": "Save Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Photo": {
+      "main": [
+        [
+          {
+            "node": "Send Photo Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Photo Question": {
+      "main": [
+        [
+          {
+            "node": "Save Photo Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "errorWorkflow": "O6BjG1ublqWZ1KWk",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

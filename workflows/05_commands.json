@@ -1,0 +1,304 @@
+{
+  "name": "[HUB] Жора Commands",
+  "description": null,
+  "nodes": [
+    {
+      "id": "exec-trigger-001",
+      "name": "When Called by Жора",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "<uuid>",
+      "name": "Command Handler",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const command = $json.text?.toLowerCase().trim() || '';\nconst chatId = $json.chat_id;\nconst messageId = $json.message_id;\n\nlet commandType = 'unknown';\n\nif (command === '/stop') {\n  commandType = 'stop';\n} else if (command === '/start') {\n  commandType = 'start';\n}\n\nreturn {\n  json: {\n    chat_id: chatId,\n    message_id: messageId,\n    command: commandType,\n    original_command: command\n  }\n};"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "<uuid>",
+      "name": "Switch Command Type",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "stop",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "stop"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "start",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "<uuid>",
+                    "operator": {
+                      "name": "filter.operator.equals",
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "start"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 3.3
+    },
+    {
+      "id": "8d554fca-36d7-47ae-b07d-ae<TG_USER_ID>b",
+      "name": "Send Stop Response",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        660,
+        -80
+      ],
+      "parameters": {
+        "text": "Понял. Очистил контекст. Жду новую команду.",
+        "chatId": "={{ $json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Stop Command",
+      "type": "n8n-nodes-base.supabase",
+      "position": [
+        880,
+        -80
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.result.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $('Command Handler').first().json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "command"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({command: 'stop', original_message_id: $('Command Handler').first().json.message_id}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "<uuid>",
+      "name": "Send Start Response",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        660,
+        80
+      ],
+      "parameters": {
+        "text": "=*Здарова\\! Я SMM Agent System \\- мультиагентная система для замены команды маркетологов \\(версия 0\\.9\\)*\n\n/stop — очистит контекст\\.\n\n🚀 Погнали\\! Жду задачи\\.",
+        "chatId": "={{ $json.chat_id }}",
+        "resource": "message",
+        "operation": "sendMessage",
+        "additionalFields": {
+          "parse_mode": "MarkdownV2",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "<credential-id>",
+          "name": "Telegram Account"
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "<uuid>",
+      "name": "Save Start Command",
+      "type": "n8n-nodes-base.supabase",
+      "position": [
+        880,
+        80
+      ],
+      "parameters": {
+        "schema": "smm_army",
+        "tableId": "sent_messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telegram_message_id",
+              "fieldValue": "={{ $json.result.message_id }}"
+            },
+            {
+              "fieldId": "telegram_chat_id",
+              "fieldValue": "={{ $('Command Handler').first().json.chat_id }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "command"
+            },
+            {
+              "fieldId": "content_data",
+              "fieldValue": "={{ JSON.stringify({command: 'start', original_message_id: $('Command Handler').first().json.message_id}) }}"
+            }
+          ]
+        },
+        "useCustomSchema": true
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<credential-id>",
+          "name": "Supabase Account"
+        }
+      },
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "When Called by Жора": {
+      "main": [
+        [
+          {
+            "node": "Command Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Handler": {
+      "main": [
+        [
+          {
+            "node": "Switch Command Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Command Type": {
+      "main": [
+        [
+          {
+            "node": "Send Stop Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Start Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Stop Response": {
+      "main": [
+        [
+          {
+            "node": "Save Stop Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Start Response": {
+      "main": [
+        [
+          {
+            "node": "Save Start Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "errorWorkflow": "O6BjG1ublqWZ1KWk",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}
