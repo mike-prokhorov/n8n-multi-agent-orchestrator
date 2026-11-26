@@ -320,8 +320,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "ms4UpiiPsGF8GRpZ",
-          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "value": "<copywriting-workflow-id>",
           "cachedResultName": ""
         },
         "workflowInputs": {
@@ -350,8 +349,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "w2J2Nvqf9w3T8G2I",
-          "cachedResultUrl": "/workflow/YWVgcNTa3YG2rvJA",
+          "value": "<research-workflow-id>",
           "cachedResultName": "[SMM] Research Agent"
         },
         "workflowInputs": {
@@ -380,8 +378,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "RLNAMdc1C9krPt7o",
-          "cachedResultUrl": "/workflow/WHvXosyNwhLB6OOp",
+          "value": "<image-gen-workflow-id>",
           "cachedResultName": ""
         },
         "workflowInputs": {
@@ -410,8 +407,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "yrdBxd3PxAosMSGg",
-          "cachedResultUrl": "/workflow/UpcjQTagDBhV8ChU",
+          "value": "<image-edit-workflow-id>",
           "cachedResultName": ""
         },
         "workflowInputs": {
@@ -606,8 +602,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "UPFcgobNesc5H0do",
-          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "value": "<longwriter-workflow-id>",
           "cachedResultName": "Secretary: Longwriter"
         },
         "workflowInputs": {
@@ -636,8 +631,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "oVbxXDb6knuvR9MJ",
-          "cachedResultUrl": "/workflow/7eCTCPZ2fFhMqhKd",
+          "value": "<reels-ideas-workflow-id>",
           "cachedResultName": "Reels Collector Bot"
         },
         "workflowInputs": {
@@ -879,37 +873,5 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "staticData": {
-    "global": {
-      "options_undefined": {
-        "options": [
-          {
-            "num": 1,
-            "emoji": "🔍",
-            "title": "проанализировать ваши TikTok ссылки",
-            "intent": "analyze_links",
-            "department": "reels_ideas",
-            "request": "проанализируйте все TikTok ссылки, которые пользователь предоставлял, и составьте полный список с датами и авторами"
-          },
-          {
-            "num": 2,
-            "emoji": "📝",
-            "title": "создать пост о ваших TikTok предпочтениях",
-            "intent": "create_post",
-            "department": "copywriting",
-            "request": "напишите короткий пост о предпочтениях пользователя в TikTok на основе предоставленных ссылок, включая даты и авторов"
-          },
-          {
-            "num": 3,
-            "emoji": "📊",
-            "title": "исследовать популярные TikTok тренды",
-            "intent": "research_trends",
-            "department": "research",
-            "request": "исследуйте популярные тренды в TikTok, которые могли бы соответствовать интересам пользователя на основе предоставленных ссылок"
-          }
-        ],
-        "expires": 1776843865710
-      }
-    }
-  }
+  "staticData": null
 }

@@ -10,3 +10,4 @@ raw/
 .DS_Store
 .vscode/
 .idea/
+__pycache__/
