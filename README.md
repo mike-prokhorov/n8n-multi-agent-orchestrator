@@ -110,7 +110,7 @@ You need: an n8n instance with the LangChain nodes, a Supabase project, a Telegr
 python -m unittest discover -s tests -v
 ```
 
-`tests/test_workflows.py` checks that all six workflows are present and their connections point to existing nodes; that the classifier's `intent` and `department` labels match the dispatcher's branches; that 06 only calls workflows from this repo; and that no file contains a token, key, credential id, workflow id, webhook id or runtime state. CI runs it with a [gitleaks](https://github.com/gitleaks/gitleaks) scan of the full history on every push and pull request.
+`tests/test_workflows.py` checks that all six workflows are present and their connections point to existing nodes; that the classifier's `intent` and `department` labels match the dispatcher's branches; that 06 only calls workflows from this repo; and that no file contains a token, key, credential id, workflow id, webhook id or runtime state. CI runs it on every push and pull request, together with a [gitleaks](https://github.com/gitleaks/gitleaks) scan of the new commits.
 
 ---
 
