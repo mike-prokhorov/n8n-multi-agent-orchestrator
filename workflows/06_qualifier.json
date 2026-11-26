@@ -507,7 +507,7 @@
         1008
       ],
       "parameters": {
-        "url": "https://api.telegram.org/bot<TG_USER_ID>:AAEsrbkAUgG7GFKpd_UqrjR0m8d8r3akSTM/sendChatAction",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendChatAction",
         "method": "POST",
         "options": {
           "timeout": 30000
@@ -587,7 +587,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "2TNavCr9XfeeXYHN",
+          "value": "<commands-workflow-id>",
           "cachedResultName": "[HUB] Жора Commands"
         },
         "workflowInputs": {
@@ -662,7 +662,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "p7jpXhztHs77S2fT",
+          "value": "<media-workflow-id>",
           "cachedResultName": "[HUB] Жора Media"
         },
         "workflowInputs": {
@@ -689,7 +689,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "qtySxzjNAuv6DNg9",
+          "value": "<classifier-workflow-id>",
           "cachedResultName": "[HUB] Жора AI Classifier"
         },
         "workflowInputs": {
@@ -716,7 +716,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "VnGlEDpzbmzGngFf",
+          "value": "<action-workflow-id>",
           "cachedResultName": "[HUB] Жора Action"
         },
         "workflowInputs": {
@@ -743,7 +743,7 @@
         "workflowId": {
           "__rl": true,
           "mode": "list",
-          "value": "XfRhryytHjmF7H6m",
+          "value": "<capture-workflow-id>",
           "cachedResultName": "[HUB] Жора Capture"
         },
         "workflowInputs": {

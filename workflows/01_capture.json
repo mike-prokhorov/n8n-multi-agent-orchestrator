@@ -128,7 +128,7 @@
       ],
       "parameters": {
         "operation": "create",
-        "tableId": "zhora_inbox",
+        "tableId": "inbox",
         "fieldsUi": {
           "fieldValues": [
             {
